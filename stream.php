@@ -1,53 +1,61 @@
 <?php
 set_time_limit(0);
 
+// List of channels: 'folder_name' => 'stream_url'
 $channels = [
     'starsports1tamil' => 'https://TS-j8bh.onrender.com/Box.ts?id=4',
-    'sonyyay' => 'https://TS-j8bh.onrender.com/Box.ts?id=3',
-    'Starsports2tamilhd' => 'https://TS-j8bh.onrender.com/Box.ts?id=2',
+    'sonyyay'          => 'https://TS-j8bh.onrender.com/Box.ts?id=3',
 ];
 
-$segmentDuration = 10;         // Each segment = 10 seconds
-$baseDir = __DIR__;            // Save in same folder as this script
+// Segment config
+$segmentDuration = 10;
+$baseDir = __DIR__;
 
 foreach ($channels as $name => $url) {
-    $pid = pcntl_fork();
+    echo "▶ Starting stream for $name...\n";
 
-    if ($pid == -1) {
-        echo "❌ Failed to fork for $name\n";
-        continue;
-    }
+    $outputDir = "$baseDir/$name";
+    if (!file_exists($outputDir)) mkdir($outputDir, 0777, true);
 
-    if ($pid === 0) {
-        echo "▶ Starting $name...\n";
+    $segmentIndex = 0;
+    $previousSegment = null;
 
-        $outputDir = "$baseDir/$name";
-        if (!file_exists($outputDir)) mkdir($outputDir, 0777, true);
+    while (true) {
+        $segmentFile = "$outputDir/index$segmentIndex.ts";
+        $liveUrl = $url . '&cache=' . time();
 
-        $segmentIndex = 0;
+        // FFmpeg command to capture 10s
+        $cmd = "ffmpeg -y -fflags +discardcorrupt -re -rw_timeout 5000000 -i \"$liveUrl\" -t $segmentDuration -c copy \"$segmentFile\" 2>&1";
+        echo "[$name] Running: $cmd\n";
+        $output = shell_exec($cmd);
+        echo "[$name] FFmpeg Output:\n$output\n";
 
-        while (true) {
-            $segmentFile = "$outputDir/index$segmentIndex.ts";
-            $liveUrl = $url . '&cache=' . time();
+        if (file_exists($segmentFile)) {
+            // Write fresh playlist with only latest segment
+            $m3u8 = "#EXTM3U\n";
+            $m3u8 .= "#EXT-X-VERSION:3\n";
+            $m3u8 .= "#EXT-X-TARGETDURATION:$segmentDuration\n";
+            $m3u8 .= "#EXT-X-MEDIA-SEQUENCE:$segmentIndex\n";
+            $m3u8 .= "#EXTINF:$segmentDuration,\nindex$segmentIndex.ts\n";
 
-            $cmd = "ffmpeg -y -fflags +discardcorrupt -re -rw_timeout 5000000 -i \"$liveUrl\" -t $segmentDuration -c copy \"$segmentFile\" 2>&1";
-            echo "[$name] Running: $cmd\n";
-            $output = shell_exec($cmd);
-            echo "[$name] FFmpeg Output:\n$output\n";
+            file_put_contents("$outputDir/index.m3u8", $m3u8);
+            echo "[$name] ✅ index$segmentIndex.ts saved, playlist updated\n";
 
-            if (file_exists($segmentFile)) {
-                // Append to playlist
-                $m3u8 = "#EXTINF:$segmentDuration,\nindex$segmentIndex.ts\n";
-                file_put_contents("$outputDir/index.m3u8", $m3u8, FILE_APPEND);
-                echo "[$name] ✅ Segment $segmentIndex written\n";
-            } else {
-                echo "[$name] ❌ Failed to save segment $segmentIndex\n";
+            // Delete previous segment
+            if ($previousSegment !== null) {
+                $oldFile = "$outputDir/index$previousSegment.ts";
+                if (file_exists($oldFile)) {
+                    unlink($oldFile);
+                    echo "[$name] 🗑 Deleted: index$previousSegment.ts\n";
+                }
             }
 
-            $segmentIndex++;
-            sleep($segmentDuration);
+            $previousSegment = $segmentIndex;
+        } else {
+            echo "[$name] ❌ Failed to save segment $segmentIndex\n";
         }
 
-        exit();
+        $segmentIndex++;
+        sleep($segmentDuration);
     }
 }
