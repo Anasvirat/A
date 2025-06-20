@@ -1,7 +1,4 @@
 <?php
-echo "🛑 Stopping stream.php...\n";
-
-// Try killing all PHP processes running stream.php
-$output = shell_exec("pkill -f stream.php 2>&1");
-
-echo "✅ stream.php stopped (if running)\n";
+echo "🛑 Stopping stream scripts...\n";
+$output = shell_exec("pkill -f stream_ 2>&1");
+echo "✅ stream processes stopped (if running)\n";
